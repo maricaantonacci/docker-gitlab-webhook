@@ -6,37 +6,35 @@
 version: "3.3"
 
 services:
-  web:
-    // blah blah blah...
+  app:
+    [ ... ]
   webhook:
     restart: unless-stopped
-    image: libert/docker-gitlab-webhook:latest
+    image: mywebhook
     ports:
-      - 8080:80
+      - 8888:80
     volumes:
-      # Mount this code into /app
-      - .:/app
+      # Mount the configuration file (see below)
+      - ./config/config.json:/hook/config.json
+      # Mount the repositories to be updated
+      - /opt/repo1:/opt/repo1
+      - /opt/repo2:/opt/repo2
+      ...
+      # Mount the deploy keys (needed for private repos)
+      - ./config/.ssh:/root/.ssh
       # Mount the docker socket
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Mount ssh key
-      - /home/user/.ssh:/root/.ssh
     environment:
-        REPOSITORY: drupal-composer
-        TOKEN: xyzaerty
-        BRANCH: test
-        COMPOSE_PROJECT_NAME: my_project_directory
-        POST_SCRIPT: docker-compose exec -T web /project/scripts/update.sh
+        TOKEN: supersecrettoken
+        BRANCH: main
+        POST_SCRIPT: docker-compose restart app
 ```
-**/!\ volumes /app and /var/run/docker.sock are required /!\**  
-** .ssh directory is required if you are private project**
-
 
 
 ## Environment parameters
 
 Parameters            | Second Header
 ------------          | -------------
-REPOSITORY*           | Gitlab repository name
 TOKEN*                | Gilab token
 BRANCH*               | Git branch
 COMPOSE_PROJECT_NAME  | docker-compose base dir (if use *docker-compose* in POST_SCRIPT)
@@ -45,8 +43,19 @@ POST_SCRIPT           | Run script after git pull (if launch *docker-compose exe
 
  ** *Required parameters **
 
- ## Result
- ### pull result
-![Pull example](https://i.imgur.com/NNJMfhD.png)
- ### POST_SCRIPT result
-![Example](https://i.imgur.com/Ui8rlbr.png)
+ ## Hook Configuration file
+
+The configuration file provides the list of repositories that will be updated when the hook runs. The local repository paths must be provided as volumes mounted in the container (see the docker compose file example above). 
+ 
+```yaml
+{
+  "LOCAL_REPO_PATHS": {
+     "repo_name_1": "/opt/repo1",
+     "repo_name_2": "/opt/repo2"
+     ...
+  }
+}
+```
+
+
+
