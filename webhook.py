@@ -10,18 +10,18 @@ import os
 import subprocess
 import yaml
 import sys
+import json
 
 from flask import Flask
 from flask import g, jsonify, request, abort
 
 app = Flask(__name__)
 app.config['DEBUG'] = False
-
+app.config.from_file('config.json', load=json.load)
 
 
 repository = os.getenv("REPOSITORY")
 token = os.getenv("TOKEN")
-repo_dir = "/app"
 branch = os.getenv("BRANCH", "master")
 pre_script = os.getenv("PRE_SCRIPT")
 post_script = os.getenv("POST_SCRIPT")
@@ -47,29 +47,55 @@ def receive():
   token_gitlab = request.headers.get('X-Gitlab-Token', False)
   data = request.json or {}
 
+  print("Payload: {}".format(data), file=sys.stderr)
 
   if not token_gitlab:
     abort(403, 'No X-Gitlab-Token header given')
+    
+  local_repo_paths = app.config.get('LOCAL_REPO_PATHS')
 
   if ('repository' in data and 'name' in data['repository'] and
-      data['repository']['name'] == repository):
+      data['repository']['name'] in local_repo_paths.keys()):
     print("Matching repo: {}".format(data['repository']), file=sys.stderr)
 
     if token_gitlab != token:
       print('Token invalid, expected: {}, got: {}'.format(token, token), file=sys.stderr)
+    
     url = data['repository']['url']
 
-
-    # clean up git workdir, reset changes, fetch updates
+    repo_dir = local_repo_paths.get(data['repository']['name'])
     os.chdir(repo_dir)
-    if pre_script:
-      ok, pre_script_output = run_it(pre_script)
-    ok, output = run_it('git checkout -- . && git pull && git checkout {}'.format(branch))
-    print(output, file=sys.stderr)
-    if post_script:
-      ok, post_script_output = run_it(post_script)
-    if not ok:
-      print("Script error", file=sys.stderr)
+
+    if request.headers.get('X-Gitlab-Event') == 'Push Hook' and data['ref'].split('/').pop() == branch:
+      
+      if pre_script:
+        ok, pre_script_output = run_it(pre_script)
+      #ok, output = run_it('git fetch && git reset --hard origin/{} && git checkout {}'.format(branch, branch, branch))
+      ok, output = run_it('git fetch origin && git reset --hard origin/{} && git clean -f -d'.format(branch))
+      
+      print(output, file=sys.stderr)
+      
+      if post_script:
+        ok, post_script_output = run_it(post_script)
+      if not ok:
+        print("Script error", file=sys.stderr)
+    
+    elif request.headers.get('X-Gitlab-Event') == 'Merge Request Hook' and data['object_attributes']['target_branch'] == branch:
+  
+      if pre_script:
+        ok, pre_script_output = run_it(pre_script)
+      
+      mr_id = data['object_attributes']['iid']
+      ok, output = run_it('git fetch origin merge-requests/{}/head && git checkout FETCH_HEAD'.format(mr_id, branch))
+  
+      print(output, file=sys.stderr)
+  
+      if post_script:
+        ok, post_script_output = run_it(post_script)
+      if not ok:
+        print("Script error", file=sys.stderr)
+    else:
+        print("Nothing to do....", file=sys.stderr)
 
   return 'success: {}'.format(request.json)
 
